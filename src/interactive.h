@@ -17,14 +17,16 @@ namespace luashell
 class CInteractive : public walleve::CConsole
 {
 public:
-    CInteractive();
+    CInteractive(const bool fConsoleIn = true);
     ~CInteractive();
 protected:
     bool WalleveHandleInitialize();
+    bool WalleveHandleInvoke();
     void WalleveHandleDeinitialize();
     void EnterLoop();
     void LeaveLoop();
     bool HandleLine(const std::string& strLine);
+    void ExecuteCommand();
     void ReportError();
     const CLuaShellConfig* WalleveConfig()
     {

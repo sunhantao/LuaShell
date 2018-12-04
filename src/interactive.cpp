@@ -15,11 +15,13 @@ using namespace luashell;
 using namespace walleve;
 using namespace json_spirit;
 
+extern void LuaShellShutdown();
+
 ///////////////////////////////
 // CInteractive
 
-CInteractive::CInteractive() 
-: CConsole("interactive","fnfn>")
+CInteractive::CInteractive(const bool fConsoleIn) 
+: CConsole("interactive", "fnfn>", fConsoleIn)
 {
     pRPCClient = NULL;
 }
@@ -66,6 +68,16 @@ bool CInteractive::WalleveHandleInitialize()
         WalleveLog("Failed to load lua printresult\n");
         return false;
     }
+    return true;
+}
+
+bool CInteractive::WalleveHandleInvoke()
+{
+    if (!CConsole::WalleveHandleInvoke())
+    {
+        return false;
+    }
+
     return true;
 }
 
@@ -141,6 +153,39 @@ bool CInteractive::HandleLine(const string& strLine)
         lua_gc(luaState, LUA_GCCOLLECT, 0);
     }
     return fSingleLine;
+}
+
+void CInteractive::ExecuteCommand()
+{
+    lua_settop(luaState,0);
+    const auto& vecCommand = WalleveConfig()->vecCommand;
+    if (vecCommand.size() > 0)
+    {
+        string modname = vecCommand[0].substr(0, vecCommand[0].find(".lua"));
+        ostringstream oss;
+        oss << "require('" << modname << "')(";
+        if (vecCommand.size() > 1)
+        {
+            accumulate(vecCommand.begin() + 1, vecCommand.end(), ostream_iterator<string>(oss, ","));
+        }
+        oss << ")";
+        cout << oss.str() << endl;
+        // for (int i = 1; i < vecCommand.size(); i++)
+        // {
+        //     lua_pushstring(luaState, vecCommand[i].c_str());
+        // }
+
+        // lua_settop(luaState,0);
+        // luaL_dostring(luaState, (string("('node.lua") + "'); ").c_str());
+        // boost::filesystem::path pathLib(WalleveConfig()->strLuaPath);
+        // lua_pushstring(luaState, (pathLib / "?.lua").string().c_str());
+        // lua_setfield(luaState, -2, "path");
+        // lua_pop(luaState, 1);
+        // lua_settop(luaState,0);
+        // luaL_dostring(luaState, (string("package.path = package.path .. ';?.lua;' .. '") + (pathLib / "?.lua").string() + ";'").c_str());
+        // cout << luaL_loadfile(luaState, vecCommand[0].c_str()) << endl;;
+    }
+    LuaShellShutdown(); 
 }
 
 void CInteractive::ReportError()
