@@ -2,9 +2,17 @@
 -- node.lua
 --
 
-args = {...}
-print(#args)
-os.execute("sleep 3")
+a, b = ...
+print('hahaha')
+print(a)
+print(b)
+print('xixixi')
+
+for i = 1, 3 do
+    print("rpcasyncalling " .. i)
+    rpcasyncall(tostring(i))
+    print("rpcasyncalled " .. i)
+end
 
 -- local node = { _version = "0.1" }
 

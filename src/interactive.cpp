@@ -8,6 +8,7 @@
 #include "json/json_spirit_writer_template.h"
 #include "json/json_spirit_utils.h"
 
+#include <numeric>
 #include <boost/filesystem.hpp>
 
 using namespace std;
@@ -163,27 +164,20 @@ void CInteractive::ExecuteCommand()
     {
         string modname = vecCommand[0].substr(0, vecCommand[0].find(".lua"));
         ostringstream oss;
-        oss << "require('" << modname << "')(";
-        if (vecCommand.size() > 1)
-        {
-            accumulate(vecCommand.begin() + 1, vecCommand.end(), ostream_iterator<string>(oss, ","));
-        }
-        oss << ")";
-        cout << oss.str() << endl;
-        // for (int i = 1; i < vecCommand.size(); i++)
+        oss << "local f = require('" << modname << "');";
+        // " f(";
+        // if (vecCommand.size() > 1)
         // {
-        //     lua_pushstring(luaState, vecCommand[i].c_str());
+        //     oss << accumulate(vecCommand.begin() + 2, vecCommand.end(), vecCommand[1],
+        //                         [] (string a, string b)
+        //                         {
+        //                             return a + "," + b;
+        //                         });
         // }
+        // oss << ");";
+        cout << oss.str() << endl;
 
-        // lua_settop(luaState,0);
-        // luaL_dostring(luaState, (string("('node.lua") + "'); ").c_str());
-        // boost::filesystem::path pathLib(WalleveConfig()->strLuaPath);
-        // lua_pushstring(luaState, (pathLib / "?.lua").string().c_str());
-        // lua_setfield(luaState, -2, "path");
-        // lua_pop(luaState, 1);
-        // lua_settop(luaState,0);
-        // luaL_dostring(luaState, (string("package.path = package.path .. ';?.lua;' .. '") + (pathLib / "?.lua").string() + ";'").c_str());
-        // cout << luaL_loadfile(luaState, vecCommand[0].c_str()) << endl;;
+        luaL_dostring(luaState, oss.str().c_str());
     }
     LuaShellShutdown(); 
 }
@@ -284,6 +278,53 @@ int CInteractive::L_RPCJson(lua_State *L)
     return 2;    
 }
 
+int CInteractive::L_RPCAsynCall(lua_State *L)
+{
+    const char* s = lua_tostring(L,1);
+    cout << "L_RPCAsynCall: " << s << endl;
+    lua_settop(L, 0);
+    cout << "L_RPCAsynCall: yielding" << endl;
+    lua_yield(L, 0);
+    cout << "L_RPCAsynCall: yielded" << endl;
+    cout << "L_RPCAsynCall: resuming" << endl;
+    lua_resume(L, 0, 0);
+    cout << "L_RPCAsynCall: resume" << endl;
+    return 0;
+    // CRPCClient* pRPCClient = static_cast<CRPCClient*>(lua_touserdata(L,lua_upvalueindex(1)));
+    // if (lua_gettop(L) < 2 || !lua_isstring(L,1) || !lua_istable(L,2))
+    // {
+    //     return L_Error(L,-32602,"invalid parameter");
+    // }
+   
+    // Value param;
+    // if (!L_JsonEncode(L,param,2) || param.type() != obj_type)
+    // {
+    //     return L_Error(L,-32602,"invalid parameter");
+    // } 
+
+    // Object reply;
+    // if (!pRPCClient->CallRPC(lua_tostring(L,1),param.get_obj(),reply))
+    // {
+    //     return L_Error(L,-32603,"rpc failed");
+    // }
+
+    // const Value& error = find_value(reply, "error");
+    // if (error.type() == obj_type)
+    // {
+    //     const Value& code = find_value(error.get_obj(),"code");
+    //     const Value& message = find_value(error.get_obj(),"message");
+    //     if (code.type() != int_type || message.type() != str_type)
+    //     {
+    //         return L_Error(L,-32603,"invalid replay");
+    //     }
+    //     return L_Error(L,code.get_int(),message.get_str());
+    // }
+    
+    // lua_pushinteger(L,0);
+    // L_JsonDecode(L,find_value(reply, "result"));
+    // return 2;    
+}
+
 void CInteractive::LoadCFunc()
 {
     lua_settop(luaState,0);
@@ -295,6 +336,10 @@ void CInteractive::LoadCFunc()
     lua_pushlightuserdata(luaState,pRPCClient);
     lua_pushcclosure(luaState,CInteractive::L_RPCJson,1);
     lua_setglobal(luaState,"rpcjson");
+
+    lua_pushlightuserdata(luaState,pRPCClient);
+    lua_pushcclosure(luaState,CInteractive::L_RPCAsynCall,1);
+    lua_setglobal(luaState,"rpcasyncall");
 }
 
 const string CInteractive::strLuaPrintResult =
