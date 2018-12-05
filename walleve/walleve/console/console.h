@@ -38,6 +38,7 @@ protected:
     virtual void LeaveLoop();
     virtual bool HandleLine(const std::string& strLine);
     virtual void ExecuteCommand();
+    virtual void ExitCommand();
 
 private:
     void WaitForChars();

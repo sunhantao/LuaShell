@@ -440,4 +440,49 @@ function rpc.decodetransaction(txdata)
   return rpccall("decodetransaction",{ ["txdata"] = txdata })
 end
 
+
+function rpc.asynchelp(command)
+  t = {}
+  if type(command) == "string" then
+    t.command = command
+  end
+
+  co = coroutine.create(function()
+    rpc.yieldco(co)
+    errno, err = rpcasynccall(rpc.resumeco, co, "help",{ ["command"] = command })
+    print("rpcasynccall", errno, err)
+    if errno ~= 0 then
+      rpc.deleteco(co)
+    else
+      errno, value = coroutine.yield(co)
+      print("resume....")
+      print(errno .. " " .. value)
+    end
+  end)
+  coroutine.resume(co)
+end
+-- 
+rpc.coroutines = {}
+function rpc.resumeco(co, errno, resp)
+print("rpc.resumeco")
+  rpc.coroutines[co] = { ["error"] = errno, ["value"] = resp }
+end
+
+function rpc.yieldco(co)
+  rpc.coroutines[co] = 0
+end
+
+function rpc.deleteco(co)
+  rpc.coroutines[co] = nil
+end
+
+function rpc.dealco()
+print("rpc.dealco")
+  for k, v in pairs(rpc.coroutines) do
+    if type(v) == "table" then
+      coroutine.resume(k, v.error, v.value)
+    end
+  end
+end
+
 return rpc

@@ -91,6 +91,12 @@ void CConsole::WalleveHandleHalt()
     {
         ioService.stop();
     }
+
+    if (!fConsole)
+    {
+        ExitCommand();
+    }
+
     WalleveThreadExit(thrConsole);
     UninstallReadline();
 }
@@ -133,6 +139,11 @@ bool CConsole::HandleLine(const string& strLine)
 }
 
 void CConsole::ExecuteCommand()
+{
+    return;
+}
+
+void CConsole::ExitCommand()
 {
     return;
 }

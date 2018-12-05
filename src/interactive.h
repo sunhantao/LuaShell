@@ -27,6 +27,7 @@ protected:
     void LeaveLoop();
     bool HandleLine(const std::string& strLine);
     void ExecuteCommand();
+    void ExitCommand();
     void ReportError();
     const CLuaShellConfig* WalleveConfig()
     {
@@ -36,7 +37,9 @@ protected:
     static int L_Error(lua_State *L,int errcode,const std::string& strMsg = "");
     static int L_RPCCall(lua_State *L); 
     static int L_RPCJson(lua_State *L); 
-    static int L_RPCAsynCall(lua_State *L);
+    static int L_RPCAsyncCall(lua_State *L);
+    static int L_Sleep(lua_State *L);
+    static void RPCAsyncCallback(lua_State *L, uint64 nNonce, json_spirit::Value& jsonRspRet);
 protected:
     CRPCClient* pRPCClient;
     lua_State* luaState;
