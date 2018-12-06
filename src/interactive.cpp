@@ -22,7 +22,8 @@ extern void LuaShellShutdown();
 // CInteractive
 
 CInteractive::CInteractive(const bool fConsoleIn) 
-: CConsole("interactive", "fnfn>", fConsoleIn)
+: CConsole("interactive", "fnfn>", fConsoleIn),
+  vecAsyncResp(nMaxRespSize), nRead(0), nWrite(0)
 {
     pRPCClient = NULL;
 }
@@ -244,7 +245,7 @@ int CInteractive::L_Error(lua_State *L,int errcode,const string& strMsg)
 
 int CInteractive::L_RPCCall(lua_State *L)
 {
-    CRPCClient* pRPCClient = static_cast<CRPCClient*>(lua_touserdata(L,lua_upvalueindex(1)));
+    CInteractive* ptr = static_cast<CInteractive*>(lua_touserdata(L,lua_upvalueindex(1)));
     if (lua_gettop(L) < 2 || !lua_isstring(L,1) || !lua_istable(L,2))
     {
         return L_Error(L,-32602,"invalid parameter");
@@ -257,7 +258,7 @@ int CInteractive::L_RPCCall(lua_State *L)
     } 
 
     Object reply;
-    if (!pRPCClient->CallRPC(lua_tostring(L,1),param.get_obj(),reply))
+    if (!ptr->pRPCClient->CallRPC(lua_tostring(L,1),param.get_obj(),reply))
     {
         return L_Error(L,-32603,"rpc failed");
     }
@@ -281,7 +282,7 @@ int CInteractive::L_RPCCall(lua_State *L)
  
 int CInteractive::L_RPCJson(lua_State *L)
 {
-    CRPCClient* pRPCClient = static_cast<CRPCClient*>(lua_touserdata(L,lua_upvalueindex(1)));
+    CInteractive* ptr = static_cast<CInteractive*>(lua_touserdata(L,lua_upvalueindex(1)));
     if (lua_gettop(L) < 2 || !lua_isstring(L,1) || !lua_isstring(L,2))
     {
         return L_Error(L,-32602,"invalid parameter");
@@ -294,7 +295,7 @@ int CInteractive::L_RPCJson(lua_State *L)
     }
     
     Object reply;
-    if (!pRPCClient->CallRPC(lua_tostring(L,1),valParam.get_obj(),reply))
+    if (!ptr->pRPCClient->CallRPC(lua_tostring(L,1),valParam.get_obj(),reply))
     {
         return L_Error(L,-32603,"rpc failed");
     }
@@ -319,40 +320,103 @@ int CInteractive::L_RPCJson(lua_State *L)
 
 int CInteractive::L_RPCAsyncCall(lua_State *L)
 {
-    CRPCClient* pRPCClient = static_cast<CRPCClient*>(lua_touserdata(L,lua_upvalueindex(1)));
-    if (lua_gettop(L) < 4 || !lua_isfunction(L, 1) || !lua_isthread(L, 2) || !lua_isstring(L, 3) || !lua_istable(L, 4))
+    cout << "L_RPCAsyncCall " << endl;
+    CInteractive* ptr = static_cast<CInteractive*>(lua_touserdata(L,lua_upvalueindex(1)));
+    if (lua_gettop(L) < 3 || !lua_isinteger(L, 1) || !lua_isstring(L, 2) || !lua_istable(L, 3))
     {
         return L_Error(L,-32602,"invalid parameter");
     }
    
     Value param;
-    if (!L_JsonEncode(L,param,4) || param.type() != obj_type)
+    if (!L_JsonEncode(L,param,3) || param.type() != obj_type)
     {
         return L_Error(L,-32602,"invalid parameter");
     } 
 
-    uint64 nNonce = pRPCClient->CallAsyncRPC(lua_tostring(L,3),param.get_obj(), bind(&CInteractive::RPCAsyncCallback, L, _1, _2));
-    if (!nNonce)
+    uint64 nNonce = lua_tointeger(L, 1);
+    if (!ptr->pRPCClient->CallAsyncRPC(nNonce, lua_tostring(L,1),
+            param.get_obj(), bind(&CInteractive::RPCAsyncCallback, ptr, _1, _2)))
     {
         return L_Error(L,-32603,"rpc failed");
     }
 
-    lua_getglobal(L, "_ASYNCRPC_");
-    if (!lua_istable(L, -1))
-    {
-        lua_newtable(L);
-        lua_setglobal(L, "_ASYNCRPC_");
-        lua_getglobal(L, "_ASYNCRPC_");
-    }
-    lua_newtable(L);
-    lua_pushvalue(L, 2);
-    lua_setfield(L, -2, "thread");
-    lua_pushvalue(L, 1);
-    lua_setfield(L, -2, "fun");
-    lua_setfield(L, -2, to_string(nNonce).c_str());
-
+    cout << "L_RPCAsyncCall success" << nNonce << endl;
+    ptr->mapAsyncLuaState[nNonce] = L;
     lua_pushinteger(L, 0);
-    lua_pushstring(L, "");
+    lua_pushstring(L, "success");
+    return lua_yield(L, 2);
+}
+
+int CInteractive::L_RPCAsyncWait(lua_State *L)
+{
+    CInteractive* ptr = static_cast<CInteractive*>(lua_touserdata(L,lua_upvalueindex(1)));
+    auto tm = boost::chrono::system_clock::now();
+    if (lua_gettop(L) >= 1 && lua_isinteger(L, 1))
+    {
+        tm += boost::chrono::milliseconds(lua_tointeger(L, 1));
+    }
+    else
+    {
+        tm += boost::chrono::milliseconds(1);
+    }
+
+    int nWork = 0;
+    boost::unique_lock<boost::mutex> lock(ptr->mtx);
+    while (true)
+    {
+        while(ptr->nRead != ptr->nWrite)
+        {
+            auto& resp = ptr->vecAsyncResp[ptr->nRead % nMaxRespSize];
+            uint64 nNonce = resp.first;
+            Value& jsonRspRet = resp.second;
+            auto it = ptr->mapAsyncLuaState.find(nNonce);
+            if (it != ptr->mapAsyncLuaState.end())
+            {
+                lua_State* pState = it->second;
+                do
+                {
+                    if (jsonRspRet.type() != Value_type::obj_type)
+                    {
+                        L_Error(pState, -32603, "invalid replay");
+                        break;
+                    }
+
+                    Object reply = jsonRspRet.get_obj();
+                    const Value& error = find_value(reply, "error");
+                    if (error.type() == obj_type)
+                    {
+                        const Value& code = find_value(error.get_obj(),"code");
+                        const Value& message = find_value(error.get_obj(),"message");
+                        if (code.type() != int_type || message.type() != str_type)
+                        {
+                            L_Error(pState, -32603, "invalid replay");
+                            break;
+                        }
+                        L_Error(pState, code.get_int(), message.get_str());
+                        break;
+                    }
+                
+                    lua_pushinteger(pState, 0);
+                    L_JsonDecode(pState, find_value(reply, "result"));
+
+                } while (false);
+
+                lua_resume(pState, 0, 2);
+
+                ++nWork;
+            }
+
+            ++ptr->nRead;
+        }
+
+        if (!ptr->cond.wait_until(lock, tm, [=]() { return ptr->nRead != ptr->nWrite; }))
+        {
+            // timeout
+            break;
+        }
+    }
+
+    lua_pushinteger(L, nWork);
     return 2;
 }
 
@@ -367,75 +431,32 @@ void CInteractive::LoadCFunc()
 {
     lua_settop(luaState,0);
 
-    lua_pushlightuserdata(luaState,pRPCClient);
+    lua_pushlightuserdata(luaState, this);
     lua_pushcclosure(luaState,CInteractive::L_RPCCall,1);
     lua_setglobal(luaState,"rpccall");
 
-    lua_pushlightuserdata(luaState,pRPCClient);
+    lua_pushlightuserdata(luaState, this);
     lua_pushcclosure(luaState,CInteractive::L_RPCJson,1);
     lua_setglobal(luaState,"rpcjson");
 
-    lua_pushlightuserdata(luaState,pRPCClient);
+    lua_pushlightuserdata(luaState, this);
     lua_pushcclosure(luaState,CInteractive::L_RPCAsyncCall,1);
     lua_setglobal(luaState,"rpcasynccall");
+
+    lua_pushlightuserdata(luaState, this);
+    lua_pushcclosure(luaState,CInteractive::L_RPCAsyncWait,1);
+    lua_setglobal(luaState,"rpcasyncwait");
 
     lua_pushcclosure(luaState,CInteractive::L_Sleep,0);
     lua_setglobal(luaState,"sleep");
 }
 
-void CInteractive::RPCAsyncCallback(lua_State *L, uint64 nNonce, json_spirit::Value& jsonRspRet)
+void CInteractive::RPCAsyncCallback(uint64 nNonce, json_spirit::Value& jsonRspRet)
 {
-    cout << "RPCAsyncCallback : " << lua_gettop(L) << endl;
-    try
-    {
-        do
-        {
-            lua_getglobal(L, "_ASYNCRPC_");
-            lua_getfield(L, -1, to_string(nNonce).c_str());
-            if (!lua_istable(L, -1))
-            {
-                throw runtime_error("No coroutine resume info");
-            }
-
-            lua_getfield(L, -1, "fun");
-            lua_getfield(L, -2, "thread");
-            lua_remove(L, -3);
-
-            lua_pushnil(L);
-            lua_setfield(L, -4, to_string(nNonce).c_str());
-
-            if (jsonRspRet.type() != Value_type::obj_type)
-            {
-                L_Error(L,-32603,"invalid replay");
-                break;
-            }
-
-            Object reply = jsonRspRet.get_obj();
-            const Value& error = find_value(reply, "error");
-            if (error.type() == obj_type)
-            {
-                const Value& code = find_value(error.get_obj(),"code");
-                const Value& message = find_value(error.get_obj(),"message");
-                if (code.type() != int_type || message.type() != str_type)
-                {
-                    L_Error(L,-32603,"invalid replay");
-                    break;
-                }
-                L_Error(L,code.get_int(),message.get_str());
-                break;
-            }
-        
-            lua_pushinteger(L,0);
-            L_JsonDecode(L,find_value(reply, "result"));
-
-        } while (false);
-
-        lua_pcall(L, 3, 0, 0);
-    }
-    catch (exception& e)
-    {
-        cerr << "RPCAsyncCallback error: " << e.what()<< endl;
-    }
+    cout << "RPCAsyncCallback " << nNonce << endl;
+    vecAsyncResp[nWrite % nMaxRespSize] = make_pair(nNonce, jsonRspRet);
+    ++nWrite;
+    cond.notify_all();
 }
 
 const string CInteractive::strLuaPrintResult =

@@ -52,7 +52,6 @@ bool CRPCClient::HandleEvent(CWalleveEventHttpGetRsp& eventHttpGetRsp)
         read_string(rsp.strContent, valReply);
         ret = true;
     }
-    cout << "valReply: " << nNonce << " " << rsp.nStatusCode << endl;
 
     if (nNonce == 0)
     {
@@ -66,7 +65,6 @@ bool CRPCClient::HandleEvent(CWalleveEventHttpGetRsp& eventHttpGetRsp)
     }
     else
     {
-        cout << "valReply: " << write_string(valReply) << endl;
         auto it = mapAsyncCallback.find(nNonce);
         if (it != mapAsyncCallback.end())
         {
@@ -97,10 +95,8 @@ bool CRPCClient::CallRPC(const string& strMethod,const Object& params,Object& js
     return false;
 }
 
-uint64 CRPCClient::CallAsyncRPC(const std::string& strMethod,const json_spirit::Object& params, RespAsyncCallback callback)
+bool CRPCClient::CallAsyncRPC(uint64 nNonce, const std::string& strMethod,const json_spirit::Object& params, RespAsyncCallback callback)
 {
-    static uint64 nNonce = 0;
-    while (++nNonce == 0);
     try
     {
         Object request;
@@ -110,13 +106,13 @@ uint64 CRPCClient::CallAsyncRPC(const std::string& strMethod,const json_spirit::
         if (GetResponse(nNonce,request))
         {
             mapAsyncCallback[nNonce] = callback;
-            return nNonce;
+            return true;
         }
     }
     catch (...)
     {
     }
-    return 0;
+    return false;
 }
 
 bool CRPCClient::GetResponse(uint64 nNonce,Object& jsonReq)

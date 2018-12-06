@@ -20,7 +20,7 @@ public:
     CRPCClient();
     ~CRPCClient();
     bool CallRPC(const std::string& strMethod,const json_spirit::Object& params,json_spirit::Object& jsonRspRet);
-    uint64 CallAsyncRPC(const std::string& strMethod,const json_spirit::Object& params, RespAsyncCallback callback);
+    bool CallAsyncRPC(uint64 nNonce, const std::string& strMethod,const json_spirit::Object& params, RespAsyncCallback callback);
     bool HandleEvent(walleve::CWalleveEventHttpGetRsp& eventHttpGetRsp);
 protected:
     bool WalleveHandleInitialize();
