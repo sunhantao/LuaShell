@@ -473,46 +473,33 @@ end
 
 function rpc.asycstart(fn)
   local n = getnonce()
-  print("asycstart nonce", n)
   local co
   co = coroutine.create(function()
-  print("enter co", co)
     fn()
     releasenonce(cononce[co])
     cononce[co] = nil
-  print("leave co", co)
   end)
 
   cononce[co] = n
   coroutine.resume(co)
 end
 
-function rpc.async(method, ...)
-  if impl[method] then
-    return impl[method](rpcasynccall, ...)
-  end
-end
-
 function rpc.call(method, ...)
-  if impl[method] then
-    return impl[method](rpccall, ...)
+  local co, ismain = coroutine.running()
+  local fn = impl[method]
+  if fn then
+    if ismain then
+      return fn(rpccall, ...)
+    else
+      local asyncall = function (...) return rpcasynccall(cononce[co], ...) end
+      return fn(asyncall, ...)
+    end
   end
 end
 
 setmetatable(rpc, { __index = function(t, k) 
-  local s, e = string.find(k, "async")
-  local fn = rpccall
-
-print("----------", k)
-  if s == 1 then
-    k = string.sub(e+1)
-    fn = rpcasynccall
-  end
-print("----------", impl)
-  if impl[k] then
-    return function(...)
-      return impl[k](fn, ...)
-    end
+  return function(...)
+    return rpc.call(k, ...)
   end
 end})
 

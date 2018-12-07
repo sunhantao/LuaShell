@@ -41,6 +41,7 @@ protected:
     static int L_RPCAsyncCall(lua_State *L);
     static int L_RPCAsyncWait(lua_State *L);
     static int L_Sleep(lua_State *L);
+    static int L_Now(lua_State *L);
 protected:
     CRPCClient* pRPCClient;
     lua_State* luaState;

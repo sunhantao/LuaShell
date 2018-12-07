@@ -320,7 +320,6 @@ int CInteractive::L_RPCJson(lua_State *L)
 
 int CInteractive::L_RPCAsyncCall(lua_State *L)
 {
-    cout << "L_RPCAsyncCall " << endl;
     CInteractive* ptr = static_cast<CInteractive*>(lua_touserdata(L,lua_upvalueindex(1)));
     if (lua_gettop(L) < 3 || !lua_isinteger(L, 1) || !lua_isstring(L, 2) || !lua_istable(L, 3))
     {
@@ -334,13 +333,12 @@ int CInteractive::L_RPCAsyncCall(lua_State *L)
     } 
 
     uint64 nNonce = lua_tointeger(L, 1);
-    if (!ptr->pRPCClient->CallAsyncRPC(nNonce, lua_tostring(L,1),
+    if (!ptr->pRPCClient->CallAsyncRPC(nNonce, lua_tostring(L,2),
             param.get_obj(), bind(&CInteractive::RPCAsyncCallback, ptr, _1, _2)))
     {
         return L_Error(L,-32603,"rpc failed");
     }
 
-    cout << "L_RPCAsyncCall success" << nNonce << endl;
     ptr->mapAsyncLuaState[nNonce] = L;
     lua_pushinteger(L, 0);
     lua_pushstring(L, "success");
@@ -417,7 +415,7 @@ int CInteractive::L_RPCAsyncWait(lua_State *L)
     }
 
     lua_pushinteger(L, nWork);
-    return 2;
+    return 1;
 }
 
 int CInteractive::L_Sleep(lua_State *L)
@@ -425,6 +423,13 @@ int CInteractive::L_Sleep(lua_State *L)
     int ms = (lua_gettop(L) >= 1) ? lua_tointeger(L, 1) : 1;
     this_thread::sleep_for(chrono::milliseconds(ms));
     return 0;
+}
+
+int CInteractive::L_Now(lua_State *L)
+{
+    auto now = chrono::system_clock::now();
+    lua_pushinteger(L, chrono::duration_cast<chrono::milliseconds>(now.time_since_epoch()).count());
+    return 1;
 }
 
 void CInteractive::LoadCFunc()
@@ -449,11 +454,13 @@ void CInteractive::LoadCFunc()
 
     lua_pushcclosure(luaState,CInteractive::L_Sleep,0);
     lua_setglobal(luaState,"sleep");
+
+    lua_pushcclosure(luaState,CInteractive::L_Now,0);
+    lua_setglobal(luaState,"now");
 }
 
 void CInteractive::RPCAsyncCallback(uint64 nNonce, json_spirit::Value& jsonRspRet)
 {
-    cout << "RPCAsyncCallback " << nNonce << endl;
     vecAsyncResp[nWrite % nMaxRespSize] = make_pair(nNonce, jsonRspRet);
     ++nWrite;
     cond.notify_all();
